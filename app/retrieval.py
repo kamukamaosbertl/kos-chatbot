@@ -23,7 +23,7 @@ SYNONYMS = {
     "price": ["prices", "pricing", "cost", "quote"], "cost": ["price", "pricing"],
     "hire": ["hire", "freelance", "contact", "quote"], "phone": ["whatsapp", "contact"],
     "call": ["whatsapp", "phone", "contact"], "email": ["contact", "email"],
-    "shop": ["virtual", "room", "beddings", "business"], "business": ["virtual", "room", "beddings"],
+    "shop": ["virtual", "room", "beddings", "business"], "linen": ["virtual", "room", "beddings", "products"],
     "bedding": ["beddings", "linen", "bedsheets"], "sheet": ["bedsheets"], "sheets": ["bedsheets"],
     "blanket": ["duvets"], "duvet": ["duvets"], "pillow": ["pillows"], "towel": ["towels"],
     "mattress": ["mattress", "toppers", "protectors"], "deliver": ["delivery"], "deliveries": ["delivery"],
@@ -31,8 +31,11 @@ SYNONYMS = {
     "where": ["location"], "skill": ["skills", "stack"], "stack": ["skills", "stack"],
     "language": ["javascript", "python", "stack"], "languages": ["javascript", "python", "stack"],
     "security": ["cyber", "security", "ethical", "hacking"], "hacking": ["ethical", "hacking", "penetration"],
-    "forensic": ["forensics"], "app": ["apps", "mobile", "flutter"], "website": ["web", "websites"],
-    "school": ["university", "must", "student"], "study": ["university", "student"],
+    "forensic": ["forensics"], "app": ["apps", "mobile", "flutter"], 
+    "school": ["university", "must", "student"], "study": ["university", "student", "software", "engineering"],
+    "studying": ["university", "student", "software", "engineering"], "degree": ["bsc", "university"],
+    "who": ["who"], "available": ["availability", "freelance"], "freelance": ["availability", "freelance"],
+    "website": ["web", "websites", "services"], "websites": ["web", "services"],
     "experience": ["experience"], "work": ["experience", "projects"], "project": ["projects"],
     "github": ["github", "code"], "code": ["github", "code"], "design": ["graphic", "design"],
     "chatbot": ["rag", "chatbots"], "ai": ["ai", "rag"],
@@ -46,7 +49,9 @@ def _stem(word: str) -> str:
     return word
 
 
-PHRASES = {"how much": "price", "how many": "stock", "get in touch": "contact", "reach him": "contact"}
+PHRASES = {"how much": "price", "how many": "stock", "get in touch": "contact", "reach him": "contact",
+           "who is": "student university founder engineering", "about him": "student university founder",
+           "for my business": "services web apps", "for my company": "services"}
 
 
 def tokenize(text: str, expand: bool = False) -> list[str]:
@@ -56,7 +61,7 @@ def tokenize(text: str, expand: bool = False) -> list[str]:
     words = [w for w in re.findall(r"[a-z0-9+#.]+", low) if w not in STOPWORDS]
     words = [w.strip(".") for w in words if w.strip(".")]
     if expand:
-        extra = [s for w in words for s in SYNONYMS.get(w, [])]
+        extra = [s for w in words for s in SYNONYMS.get(w, SYNONYMS.get(_stem(w), []))]
         words += extra
     return [_stem(w) for w in words]
 
@@ -113,10 +118,12 @@ class KnowledgeBase:
                 score += idf * tf * (self.k1 + 1) / (tf + self.k1 * (1 - self.b + self.b * dl / self.avgdl))
         return score
 
-    def search(self, question: str, top_k: int = 4, min_score: float = 0.5) -> list[tuple[Chunk, float]]:
+    def search(self, question: str, top_k: int = 4, min_score: float = 0.3) -> list[tuple[Chunk, float]]:
         query = tokenize(question, expand=True)
         if not query:
             return []
         ranked = sorted(((c, self._score(query, d)) for c, d in zip(self.chunks, self.docs)),
                         key=lambda x: x[1], reverse=True)
-        return [(c, s) for c, s in ranked[:top_k] if s >= min_score]
+        best = ranked[0][1] if ranked else 0
+        cutoff = max(min_score, best * 0.35)   # keep sections that are reasonably close to the best one
+        return [(c, s) for c, s in ranked[:top_k] if s >= cutoff]

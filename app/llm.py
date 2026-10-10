@@ -19,7 +19,7 @@ class LLMClient:
         self.timeout = timeout
 
     async def chat(self, messages: list[dict]) -> str:
-        payload = {"model": self.model, "messages": messages, "temperature": 0.3, "max_tokens": 400}
+        payload = {"model": self.model, "messages": messages, "temperature": 0.6, "max_tokens": 350}
         headers = {"Authorization": f"Bearer {self.api_key}"}
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:

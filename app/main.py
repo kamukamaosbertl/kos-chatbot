@@ -33,7 +33,7 @@ class Turn(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
-    history: list[Turn] = Field(default_factory=list, max_length=10)
+    history: list[Turn] = Field(default_factory=list, max_length=20)
 
 
 class ChatResponse(BaseModel):
@@ -54,7 +54,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "ai": service.llm is not None, "knowledge_sections": len(service.kb.chunks)}
+    return {"status": "ok", **service.status()}
 
 
 @app.post("/chat", response_model=ChatResponse)

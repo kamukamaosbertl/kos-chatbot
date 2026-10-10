@@ -15,8 +15,7 @@ log = logging.getLogger("chatbot")
 KNOWLEDGE_DIR = Path(__file__).resolve().parent.parent / "knowledge"
 MAX_MESSAGE_CHARS = 500
 
-GREETING = ("Hi! 👋 I'm Osbert's assistant. Ask me about his skills, projects and services, "
-            "or about Virtual Room Beddings & Comfort products and how to order.")
+GREETING = "Hello! 😊 What would you like to know, Osbert's work and services, or our linen products?"
 _GREETINGS = {"hi", "hello", "hey", "hallo", "hiya", "good morning", "good afternoon", "good evening",
               "morning", "oli ota", "agandi", "how are you", "hi there", "hello there", "yo", "sup"}
 
@@ -44,6 +43,26 @@ class ChatService:
         self.kb = kb or KnowledgeBase(KNOWLEDGE_DIR)
         self.llm = llm
         self.limiter = limiter or RateLimiter()
+        self.last_error: str | None = None      # shown on /health to help you debug
+
+    def status(self) -> dict:
+        info = {"ai": self.llm is not None, "knowledge_sections": len(self.kb.chunks)}
+        if self.llm is not None:
+            info["model"] = self.llm.model
+            info["ai_url"] = self.llm.url
+        else:
+            info["problem"] = "LLM_API_KEY is not set, so replies come straight from the knowledge files."
+        info["last_ai_error"] = self.last_error
+        return info
+
+    def _search_query(self, message: str, history: list[dict]) -> str:
+        """Short follow-ups ("tell me more", "how much is it?") are searched together
+        with the previous question, so the bot keeps track of the topic."""
+        if len(message.split()) <= 6:
+            previous = [t["content"] for t in history if t.get("role") == "user"]
+            if previous:
+                return previous[-1] + " " + message
+        return message
 
     @classmethod
     def from_env(cls) -> "ChatService":
@@ -73,13 +92,16 @@ class ChatService:
         if is_greeting(message):
             return {"reply": GREETING, "sources": []}
 
-        chunks = self.kb.search(message)
+        history = history or []
+        chunks = self.kb.search(self._search_query(message, history))
         sources = [c.title for c, _ in chunks]
         if self.llm is None:
             return {"reply": fallback_reply(chunks), "sources": sources, "mode": "test"}
         try:
-            reply = await self.llm.chat(build_messages(message, history or [], chunks))
+            reply = await self.llm.chat(build_messages(message, history, chunks, self.kb.chunks))
+            self.last_error = None
         except LLMError as e:
+            self.last_error = str(e)[:300]
             log.error("AI call failed: %s", e)
             reply = fallback_reply(chunks)
         return {"reply": reply, "sources": sources}

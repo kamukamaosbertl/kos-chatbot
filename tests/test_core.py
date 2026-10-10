@@ -20,6 +20,7 @@ def top(question):
 class FakeLLM:
     def __init__(self, fail=False):
         self.fail, self.last_messages = fail, None
+        self.model, self.url = "fake-model", "http://fake/chat/completions"
 
     async def chat(self, messages):
         self.last_messages = messages
@@ -45,6 +46,10 @@ class RetrievalTests(unittest.TestCase):
             "does he do penetration testing": "security",
             "what is his phone number": "Contact",
             "where did he do his internship": "security",
+            "Who is Osbert?": "Who he is",
+            "What is he studying, and where?": "Who he is",
+            "Is he available for freelance work?": "Availability",
+            "Can he build a website for my business?": "Web and mobile",
         }
         for q, expected in cases.items():
             with self.subTest(q=q):
@@ -64,6 +69,20 @@ class PromptTests(unittest.TestCase):
         self.assertIn("ClariBox", msgs[0]["content"])
         self.assertNotIn("evil", str(msgs[1:]))          # injected system turns are dropped
         self.assertEqual(msgs[-1], {"role": "user", "content": "what is claribox"})
+
+
+class ContextTests(unittest.TestCase):
+    def test_whole_knowledge_is_given_with_relevant_first(self):
+        msgs = build_messages("what is cyphex", [], KB.search("what is cyphex"), KB.chunks)
+        system = msgs[0]["content"]
+        self.assertLess(system.index("Cyphex"), system.index("OTHER BACKGROUND"))
+        self.assertIn("Mattress Toppers".lower(), system.lower())     # background facts present too
+        self.assertIn("Kreative Campus", system)
+
+    def test_history_is_kept(self):
+        hist = [{"role": "user", "content": f"q{i}"} for i in range(12)]
+        msgs = build_messages("now", hist, [], KB.chunks)
+        self.assertEqual(len(msgs), 1 + 10 + 1)
 
 
 class RateLimitTests(unittest.TestCase):
@@ -105,8 +124,21 @@ class ServiceTests(unittest.TestCase):
     def test_greeting_skips_ai(self):
         llm = FakeLLM()
         r = self.run_(ChatService(llm=llm, kb=KB).answer("Hello!", [], "a"))
-        self.assertIn("assistant", r["reply"])
+        self.assertIn("Osbert", r["reply"])
         self.assertIsNone(llm.last_messages)
+
+    def test_follow_up_uses_previous_question(self):
+        llm = FakeLLM()
+        svc = ChatService(llm=llm, kb=KB)
+        hist = [{"role": "user", "content": "what is ClariBox?"}, {"role": "assistant", "content": "It's a suggestion box."}]
+        r = self.run_(svc.answer("tell me more", hist, "a"))
+        self.assertTrue(any("ClariBox" in s for s in r["sources"]), r["sources"])
+        self.assertEqual(llm.last_messages[-2]["content"], "It's a suggestion box.")
+
+    def test_health_reports_ai_errors(self):
+        svc = ChatService(llm=FakeLLM(fail=True), kb=KB)
+        self.run_(svc.answer("what is cyphex", [], "a"))
+        self.assertIn("boom", svc.status()["last_ai_error"])
 
     def test_rate_limited(self):
         svc = ChatService(llm=FakeLLM(), kb=KB, limiter=RateLimiter(max_requests=1, window_seconds=60))
